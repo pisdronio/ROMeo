@@ -926,7 +926,9 @@ async function loadDatStatus() {
     const iconUrl = `/static/icons/${encodeURIComponent(con)}.png`;
     const iconEl  = `<img class="dat-console-icon" src="${iconUrl}" alt="${esc(con)}"
       onerror="this.outerHTML='<div class=\\'dat-icon-placeholder\\'>◈</div>'">`;
-    const unmatchedCount = unmatched[con] || 0;
+    const unmatchedInfo = unmatched[con] || null;
+    const unmatchedCount = unmatchedInfo ? (unmatchedInfo.count || unmatchedInfo) : 0;
+    const unmatchedExts  = unmatchedInfo && unmatchedInfo.exts ? unmatchedInfo.exts : {};
     const friendly = info.friendly || con;
 
     let statusEl, badge = "";
@@ -940,7 +942,13 @@ async function loadDatStatus() {
     }
 
     if (unmatchedCount) {
-      badge = `<span class="dat-unmatched-badge" title="${unmatchedCount} unidentified files from last scan">!${unmatchedCount}</span>`;
+      const extList = Object.entries(unmatchedExts).map(([e,n]) => `${n}×${e}`).join(", ");
+      const hasCHD  = ".chd" in unmatchedExts;
+      const tip = `${unmatchedCount} unidentified files from last scan${extList ? ': ' + extList : ''}${hasCHD ? ' — CHD files cannot be matched (compressed format)' : ''}`;
+      badge = `<span class="dat-unmatched-badge" title="${tip}">!${unmatchedCount}</span>`;
+      if (hasCHD && info.available) {
+        statusEl += `<div style="font-size:9px;color:var(--orange);margin-top:2px;">CHD files can't be matched — use BIN/CUE</div>`;
+      }
     }
 
     return `

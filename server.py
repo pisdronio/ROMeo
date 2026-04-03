@@ -169,13 +169,17 @@ def start_scan():
                 if f["crc32"] and f["crc32"] in global_dat
             ]
 
-            # Track unmatched files grouped by detected console
+            # Track unmatched files grouped by detected console + extensions
             unmatched_by_console: dict = {}
             for f in files:
                 if not f["crc32"] or f["crc32"] not in global_dat:
-                    con = detect_console(Path(f["path"]))
+                    p   = Path(f["path"])
+                    con = detect_console(p)
                     if con and con != "Unknown":
-                        unmatched_by_console[con] = unmatched_by_console.get(con, 0) + 1
+                        entry = unmatched_by_console.setdefault(con, {"count": 0, "exts": {}})
+                        entry["count"] += 1
+                        ext = p.suffix.lower()
+                        entry["exts"][ext] = entry["exts"].get(ext, 0) + 1
 
             bulk_add_collection(matches)
             finished = datetime.now().isoformat()
