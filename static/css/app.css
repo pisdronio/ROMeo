@@ -553,10 +553,22 @@ input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px;
 /* ── DAT Files view ──────────────────────────────────────────────────── */
 
 .dat-grid {
+  padding: 16px 24px 24px;
+}
+
+.dat-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--purple);
+  margin: 20px 0 8px;
+}
+.dat-section-label:first-child { margin-top: 0; }
+
+.dat-grid-inner {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 8px;
-  padding: 20px 24px;
+  gap: 6px;
 }
 
 .dat-card {
@@ -573,6 +585,22 @@ input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px;
 .dat-card.available {
   border-color: rgba(167,3,248,0.4);
   box-shadow: 0 0 6px var(--glow-p);
+}
+.dat-card:not(.available) { opacity: 0.55; }
+.dat-card:not(.available):hover { opacity: 0.8; }
+.dat-card.has-unmatched {
+  border-color: rgba(255,153,68,0.5) !important;
+  opacity: 1 !important;
+}
+.dat-unmatched-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  background: rgba(255,153,68,0.15);
+  color: var(--orange);
+  border: 1px solid rgba(255,153,68,0.3);
+  border-radius: 3px;
+  padding: 1px 5px;
+  white-space: nowrap;
 }
 
 .dat-console-icon {

@@ -904,29 +904,70 @@ async function renderDats() {
 }
 
 async function loadDatStatus() {
-  const status = await API.get("/api/dats/status");
-  const grid   = document.getElementById("dat-grid");
-  // Sort: available first, then alphabetical
-  const entries = Object.entries(status).sort((a, b) => {
-    if (a[1].available !== b[1].available) return b[1].available - a[1].available;
-    return a[0].localeCompare(b[0]);
-  });
-  grid.innerHTML = entries.map(([con, info]) => {
-    const tag = (!info.downloadable && info.available)
-      ? `<span style="font-size:9px;opacity:.5;"> imported</span>` : "";
+  const [status, unmatched] = await Promise.all([
+    API.get("/api/dats/status"),
+    API.get("/api/scan/unmatched"),
+  ]);
+  const grid = document.getElementById("dat-grid");
+
+  // Split into groups
+  const loaded   = [];
+  const download = [];
+  const manual   = [];
+
+  for (const [con, info] of Object.entries(status)) {
+    if (info.available)        loaded.push([con, info]);
+    else if (info.downloadable) download.push([con, info]);
+    else                        manual.push([con, info]);
+  }
+  const sortName = ([a], [b]) => a.localeCompare(b);
+  loaded.sort(sortName); download.sort(sortName); manual.sort(sortName);
+
+  function makeCard(con, info) {
     const iconUrl = `/static/icons/${encodeURIComponent(con)}.png`;
-    const iconEl = `<img class="dat-console-icon" src="${iconUrl}" alt="${esc(con)}"
+    const iconEl  = `<img class="dat-console-icon" src="${iconUrl}" alt="${esc(con)}"
       onerror="this.outerHTML='<div class=\\'dat-icon-placeholder\\'>◈</div>'">`;
+    const unmatchedCount = unmatched[con] || 0;
+    const friendly = info.friendly || con;
+
+    let statusEl, badge = "";
+    if (info.available) {
+      const tag = !info.downloadable ? ` <span style="font-size:9px;opacity:.5;">imported</span>` : "";
+      statusEl = `<div class="dat-entries">${info.entries.toLocaleString()} entries${tag}</div>`;
+    } else if (info.downloadable) {
+      statusEl = `<div class="dat-entries" style="color:var(--text2);">available — not downloaded</div>`;
+    } else {
+      statusEl = `<div class="dat-entries" style="color:var(--text2);">import DAT manually</div>`;
+    }
+
+    if (unmatchedCount) {
+      badge = `<span class="dat-unmatched-badge" title="${unmatchedCount} unidentified files from last scan">!${unmatchedCount}</span>`;
+    }
+
     return `
-    <div class="dat-card ${info.available ? 'available' : ''}">
+    <div class="dat-card ${info.available ? 'available' : ''} ${unmatchedCount ? 'has-unmatched' : ''}">
       ${iconEl}
       <div class="dat-info">
-        <div class="dat-name">${esc(con)}${tag}</div>
-        <div class="dat-entries">${info.available ? info.entries.toLocaleString() + ' entries' : 'not downloaded'}</div>
+        <div class="dat-name">${esc(friendly)}</div>
+        ${statusEl}
       </div>
-      <div class="dat-dot ${info.available ? 'available' : ''}"></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+        <div class="dat-dot ${info.available ? 'available' : ''}"></div>
+        ${badge}
+      </div>
     </div>`;
-  }).join("");
+  }
+
+  function section(title, cards) {
+    if (!cards.length) return "";
+    return `<div class="dat-section-label">${title}</div>
+      <div class="dat-grid-inner">${cards.map(([c,i]) => makeCard(c,i)).join("")}</div>`;
+  }
+
+  grid.innerHTML =
+    section("Loaded", loaded) +
+    section("Available to Download", download) +
+    section("Import Manually", manual);
 }
 
 let datTimer = null;

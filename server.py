@@ -14,7 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.scanner import scan_for_crcs
+from core.scanner import scan_for_crcs, detect_console
 from core.dats import (dat_status, download_dat, LIBRETRO_DATS,
                         invalidate_cache, dat_to_game_entries, load_all_dats, get_dat)
 from core.db import (upsert_games, bulk_add_collection,
@@ -27,8 +27,40 @@ app = Flask(__name__, static_folder="static")
 
 # ── In-memory progress state ──────────────────────────────────────────────────
 
+# Master list of every console ROMeo knows about
+KNOWN_CONSOLES = {
+    "NES":        "Nintendo Entertainment System",
+    "SNES":       "Super Nintendo",
+    "GB":         "Game Boy",
+    "GBC":        "Game Boy Color",
+    "GBA":        "Game Boy Advance",
+    "N64":        "Nintendo 64",
+    "NDS":        "Nintendo DS",
+    "GameCube":   "GameCube",
+    "Wii":        "Wii",
+    "PS1":        "PlayStation",
+    "PS2":        "PlayStation 2",
+    "PSP":        "PlayStation Portable",
+    "Dreamcast":  "Dreamcast",
+    "Saturn":     "Saturn",
+    "Genesis":    "Genesis / Mega Drive",
+    "MasterSys":  "Master System",
+    "GameGear":   "Game Gear",
+    "PCE":        "PC Engine",
+    "WonderSwan": "WonderSwan",
+    "NeoGeo":     "Neo Geo",
+    "Atari2600":  "Atari 2600",
+    "Atari7800":  "Atari 7800",
+    "Lynx":       "Atari Lynx",
+    "FDS":        "Famicom Disk System",
+    "PICO-8":     "PICO-8",
+    "Vectrex":    "Vectrex",
+    "MAME":       "MAME / Arcade",
+}
+
 scan_progress = {"status": "idle", "current": 0, "total": 0,
-                 "file": "", "scan_id": None, "matched": 0}
+                 "file": "", "scan_id": None, "matched": 0,
+                 "unmatched_by_console": {}}
 scan_lock = threading.Lock()
 
 dat_progress = {"status": "idle", "message": "", "done": [], "failed": []}
@@ -96,6 +128,14 @@ def start_scan():
                 if f["crc32"] and f["crc32"] in global_dat
             ]
 
+            # Track unmatched files grouped by detected console
+            unmatched_by_console: dict = {}
+            for f in files:
+                if not f["crc32"] or f["crc32"] not in global_dat:
+                    con = detect_console(Path(f["path"]))
+                    if con and con != "Unknown":
+                        unmatched_by_console[con] = unmatched_by_console.get(con, 0) + 1
+
             bulk_add_collection(matches)
             finished = datetime.now().isoformat()
             save_scan(scan_id, root, started, finished, len(files), len(matches), "done")
@@ -104,6 +144,7 @@ def start_scan():
                 scan_progress["status"] = "done"
                 scan_progress["total"] = len(files)
                 scan_progress["matched"] = len(matches)
+                scan_progress["unmatched_by_console"] = unmatched_by_console
 
         except Exception as e:
             with scan_lock:
@@ -306,7 +347,31 @@ def do_export():
 
 @app.route("/api/dats/status")
 def dats_status():
-    return jsonify(dat_status())
+    loaded = dat_status()   # consoles that have a .dat file on disk
+    # Merge with full known console list so the bookshelf is always complete
+    result = {}
+    for con, friendly in KNOWN_CONSOLES.items():
+        if con in loaded:
+            result[con] = {**loaded[con], "friendly": friendly, "known": True}
+        else:
+            result[con] = {
+                "available":    False,
+                "entries":      0,
+                "downloadable": con in LIBRETRO_DATS,
+                "friendly":     friendly,
+                "known":        True,
+            }
+    # Also include any manually imported consoles not in KNOWN_CONSOLES
+    for con, info in loaded.items():
+        if con not in result:
+            result[con] = {**info, "friendly": con, "known": False}
+    return jsonify(result)
+
+
+@app.route("/api/scan/unmatched")
+def scan_unmatched():
+    with scan_lock:
+        return jsonify(scan_progress.get("unmatched_by_console", {}))
 
 
 @app.route("/api/dats/download", methods=["POST"])
