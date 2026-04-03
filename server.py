@@ -229,11 +229,29 @@ def catalog_clear():
 
 # ── Folder / file picker ──────────────────────────────────────────────────────
 
+_REFOCUS_SCRIPT = """
+tell application "System Events"
+    set browsers to {"Google Chrome", "Safari", "Firefox", "Arc", "Brave Browser", "Microsoft Edge", "Opera"}
+    repeat with b in browsers
+        if exists (processes where name is b) then
+            set frontmost of first process whose name is b to true
+            exit repeat
+        end if
+    end repeat
+end tell
+"""
+
+def _refocus_browser():
+    import subprocess
+    subprocess.run(["osascript", "-e", _REFOCUS_SCRIPT], capture_output=True)
+
+
 @app.route("/api/browse")
 def browse_folder():
     import subprocess
     script = 'tell application "Finder" to set f to choose folder\nreturn POSIX path of f'
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    _refocus_browser()
     if result.returncode != 0:
         return jsonify({"ok": False, "path": None})
     return jsonify({"ok": True, "path": result.stdout.strip().rstrip("/")})
@@ -244,6 +262,7 @@ def browse_file():
     import subprocess
     script = 'set f to choose file with prompt "Select a DAT file"\nreturn POSIX path of f'
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    _refocus_browser()
     if result.returncode != 0:
         return jsonify({"ok": False, "path": None})
     return jsonify({"ok": True, "path": result.stdout.strip()})
