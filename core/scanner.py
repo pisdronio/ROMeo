@@ -2,6 +2,7 @@
 
 import os
 import re
+import zlib
 import hashlib
 import zipfile
 from pathlib import Path
@@ -240,7 +241,6 @@ def compute_md5(path: Path, chunk: int = 1 << 16) -> str:
 
 
 def compute_crc32(path: Path, chunk: int = 1 << 16) -> str:
-    import zlib
     crc = 0
     try:
         # For zip files, hash the first ROM inside (No-Intro DATs use uncompressed CRC32)
@@ -262,7 +262,7 @@ def compute_crc32(path: Path, chunk: int = 1 << 16) -> str:
                     break
                 crc = zlib.crc32(data, crc)
         return format(crc & 0xFFFFFFFF, "08x")
-    except (OSError, zipfile.BadZipFile):
+    except (OSError, zipfile.BadZipFile, zlib.error):
         return ""
 
 
