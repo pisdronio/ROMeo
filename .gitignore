@@ -1,0 +1,49 @@
+# Claude project memory (local only)
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# App data (user-specific, never committed)
+Library/
+*.db
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+/logs/
+
+# Loose files from old structure (migrated to static/)
+/api.js
+/app.css
+/app.js
+/views.js
+/index.html
+/dats.py
+/db.py
+/dedup.py
+/fileops.py
+/scanner.py

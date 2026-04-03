@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ROMeo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css?v=6">
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <div class="logo">
+        <div class="logo-main">
+          <span class="logo-icon">◈</span>
+          <span class="logo-text">ROM<strong>eo</strong></span>
+          <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark">◐</button>
+        </div>
+        <div class="logo-sub">entertainment organizer <span class="logo-ver">v0.3</span></div>
+      </div>
+
+      <div class="nav-section">
+        <button class="nav-btn active" data-view="library">
+          <span class="nav-icon">▦</span> Library
+        </button>
+        <button class="nav-btn" data-view="scan">
+          <span class="nav-icon">⟳</span> Scan
+        </button>
+        <button class="nav-btn" data-view="export">
+          <span class="nav-icon">↗</span> Export
+        </button>
+        <button class="nav-btn" data-view="trash">
+          <span class="nav-icon">⊘</span> Trash
+        </button>
+        <button class="nav-btn" data-view="dats">
+          <span class="nav-icon">◎</span> DAT Files
+        </button>
+      </div>
+
+      <div id="sidebar-scan-status" class="sidebar-scan-status" style="display:none;">
+        <div class="sss-label" id="sss-label">Scanning…</div>
+        <div class="progress-bar-bg" style="height:3px;margin-top:5px;">
+          <div class="progress-bar-fill" id="sss-bar" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="sidebar-stats" id="sidebar-stats">
+        <div class="stat-row"><span class="stat-label">Catalog</span><span class="stat-val" id="st-catalog">—</span></div>
+        <div class="stat-row"><span class="stat-label">Collected</span><span class="stat-val good" id="st-collected">—</span></div>
+        <div class="stat-row"><span class="stat-label">Missing</span><span class="stat-val danger" id="st-missing">—</span></div>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main id="main">
+      <div id="view-library"  class="view active"></div>
+      <div id="view-scan"     class="view"></div>
+      <div id="view-export"   class="view"></div>
+      <div id="view-trash"    class="view"></div>
+      <div id="view-dats"     class="view"></div>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <script src="/static/js/api.js?v=7"></script>
+  <script src="/static/js/views.js?v=9"></script>
+  <script src="/static/js/app.js?v=8"></script>
+</body>
+</html>
