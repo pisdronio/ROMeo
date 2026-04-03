@@ -96,6 +96,12 @@ pollGlobalScan();
   btn.addEventListener("click", () => apply(!document.body.classList.contains("light")));
 })();
 
+// Fetch version from server and display in sidebar
+API.get("/api/version").then(r => {
+  const el = document.getElementById("app-version");
+  if (el && r.version) el.textContent = "v" + r.version;
+});
+
 navigate("library");
 refreshStats();
 setInterval(refreshStats, 10000);

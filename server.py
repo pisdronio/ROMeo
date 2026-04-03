@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """ROMeo - DAT-first ROM library organizer."""
 
+VERSION = "0.3"
+
 import os
 import sys
 import uuid
@@ -31,6 +33,13 @@ scan_lock = threading.Lock()
 
 dat_progress = {"status": "idle", "message": "", "done": [], "failed": []}
 dat_lock = threading.Lock()
+
+
+# ── Version ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/version")
+def get_version():
+    return jsonify({"version": VERSION})
 
 
 # ── Static ────────────────────────────────────────────────────────────────────
@@ -522,7 +531,7 @@ def bootstrap_catalog():
 
 if __name__ == "__main__":
     print("╔══════════════════════════════════╗")
-    print("║          ROMeo  v0.2             ║")
+    print(f"║          ROMeo  v{VERSION:<16} ║")
     print("║    http://localhost:7777         ║")
     print("╚══════════════════════════════════╝")
     from core.db import init_db
