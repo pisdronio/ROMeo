@@ -807,17 +807,11 @@ async function renderDats() {
       <button class="btn" id="btn-rebuild-catalog" title="Re-import all DAT files — fixes numbered names and duplicate groups">⟳ Rebuild Catalog</button>
       <span class="muted" style="font-size:11px;">No-Intro databases via libretro-database.</span>
     </div>
-    <div id="dat-dl-progress" style="padding:8px 24px;display:none;">
-      <div class="progress-bar-bg"><div class="progress-bar-fill" id="dat-bar" style="width:0%"></div></div>
-      <div class="progress-label" id="dat-label">Downloading…</div>
-    </div>
-    <div class="dat-grid" id="dat-grid"><span class="muted">Loading…</span></div>
-
-    <div style="padding:24px 24px 8px;">
+    <div style="padding:12px 24px 16px;border-bottom:1px solid var(--line);">
       <div class="form-label" style="margin-bottom:8px;">Import DAT File</div>
-      <div class="form-hint" style="margin-bottom:12px;">
+      <div class="form-hint" style="margin-bottom:10px;">
         Download a No-Intro DAT from <strong>datomatic.no-intro.org</strong> and import it here.
-        Importing loads all game entries into your catalog immediately.
+        Console is detected automatically from the file.
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <input class="form-input" id="import-path" placeholder="Path to .dat or .zip file" style="flex:1;min-width:200px;">
@@ -825,8 +819,13 @@ async function renderDats() {
         <button class="btn primary" id="btn-import-dat" disabled>Import</button>
       </div>
       <div id="import-detect" style="margin-top:8px;min-height:24px;"></div>
-      <div id="import-result" class="mt16"></div>
+      <div id="import-result" class="mt8"></div>
     </div>
+    <div id="dat-dl-progress" style="padding:8px 24px;display:none;">
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="dat-bar" style="width:0%"></div></div>
+      <div class="progress-label" id="dat-label">Downloading…</div>
+    </div>
+    <div class="dat-grid" id="dat-grid"><span class="muted">Loading…</span></div>
   `;
 
   document.getElementById("btn-dl-all").addEventListener("click", downloadAllDats);
