@@ -184,7 +184,7 @@ function renderGroupCard(g) {
       <div class="group-header">
         <span class="gcard-dot" style="color:${dotColor};">${dot}</span>
         <span class="group-title">${esc(title)}</span>
-        <span class="group-console">${conIcon(con)}${esc(con)}</span>
+        <span class="group-console">${esc(con)}</span>
         <div class="variant-pills">${pills}</div>
         ${countBadge}
         <span class="group-chevron">▶</span>
@@ -589,7 +589,6 @@ function renderConsoleChecklist(sizeMap = {}) {
       return `
         <label class="console-check-row">
           <input type="checkbox" class="con-chk" data-con="${esc(con)}" ${checked ? 'checked' : ''}>
-          ${conIcon(con, 'con-icon-sm')}
           <span class="con-name">${esc(con)}</span>
           <span class="con-count muted">${info.have} ROMs</span>
           ${sizeStr ? `<span class="con-size">${sizeStr}${fitsIcon}</span>` : ''}
