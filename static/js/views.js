@@ -152,13 +152,25 @@ function renderGroupCard(g) {
   const dot         = allHave ? "●" : noneHave ? "○" : "◑";
   const dotColor    = allHave ? "var(--aqua)" : noneHave ? "var(--text2)" : "var(--orange)";
 
-  // Compact variant pills in header
-  const pills = variants.map(v => `
-    <span class="variant-pill ${v.collected ? 'has' : ''}" title="${esc(v.name)}">
-      <span class="vpill-dot">${v.collected ? '●' : '○'}</span>
-      <span class="vpill-region">${esc(v.region || '?')}</span>
-      ${v.bad_tags ? `<span class="vpill-warn">⚠</span>` : ''}
-    </span>`).join("");
+  // Compact variant pills — one per region, merged
+  const regionMap = {};
+  for (const v of variants) {
+    const r = v.region || '?';
+    if (!regionMap[r]) regionMap[r] = { collected: 0, total: 0, hasBad: false };
+    regionMap[r].total++;
+    if (v.collected) regionMap[r].collected++;
+    if (v.bad_tags)  regionMap[r].hasBad = true;
+  }
+  const pills = Object.entries(regionMap).map(([r, info]) => {
+    const has = info.collected > 0;
+    const count = info.total > 1 ? ` ×${info.total}` : '';
+    return `
+    <span class="variant-pill ${has ? 'has' : ''}" title="${info.collected}/${info.total} ${r}">
+      <span class="vpill-dot">${has ? '●' : '○'}</span>
+      <span class="vpill-region">${esc(r)}${count}</span>
+      ${info.hasBad ? `<span class="vpill-warn">⚠</span>` : ''}
+    </span>`;
+  }).join("");
 
   // Detail rows in body
   const rows = variants.map(v => {
