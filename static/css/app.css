@@ -1083,6 +1083,17 @@ input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px;
   display: flex;
   align-items: center;
 }
+.pbp-nomatch-note {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+.pbp-nomatch-note strong { color: var(--orange); }
 .pbp-panel-footer {
   display: flex;
   align-items: center;

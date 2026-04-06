@@ -1320,6 +1320,7 @@ function _pbpRenderItem(item, idx) {
         <button class="btn small" style="margin-left:8px;" onclick="_pbpUndo(${idx})">Undo</button>
       </div>`;
   } else {
+    const noCands = !f.candidates || !f.candidates.length;
     const candRows = (f.candidates || []).slice(0, 3).map((c, ci) => {
       const pct       = Math.round((c.score || 0) * 100);
       const cls       = item.selected && item.selected.crc32 === c.crc32 ? 'selected' : '';
@@ -1331,9 +1332,18 @@ function _pbpRenderItem(item, idx) {
       </div>`;
     }).join('');
 
+    const noMatchNote = noCands
+      ? `<div class="pbp-nomatch-note">
+           SFO title <strong>"${esc(sfoTitle)}"</strong> didn't match any catalog entry
+           — this can happen when the PBP uses a regional title (e.g. <em>Biohazard</em> vs <em>Resident Evil</em>).
+           Search by the Western name below.
+         </div>`
+      : '';
+
     bodyHtml = `
       <div class="pbp-candidates">
-        ${candRows || '<div class="muted" style="font-size:11px;padding:4px 0;">No match found — search below</div>'}
+        ${candRows || ''}
+        ${noMatchNote}
       </div>
       <div class="pbp-search-row">
         <input class="form-input pbp-search-input" id="pbp-q-${idx}" placeholder="Search game…"

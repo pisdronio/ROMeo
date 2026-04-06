@@ -126,6 +126,25 @@ def find_game_candidates(sfo_title: str, sfo_id: str = "",
             LIMIT 60""",
         params,
     ).fetchall()
+
+    # Fallback: if the 2-anchor search found nothing (e.g. Japanese SFO title
+    # "Biohazard" vs. Western catalog name "Resident Evil"), try each anchor
+    # word individually and union the results.
+    if not rows:
+        seen: set = set()
+        merged = []
+        for w in anchor_words:
+            more = conn.execute(
+                "SELECT g.crc32, g.name, g.console, g.region"
+                " FROM games g WHERE LOWER(g.name) LIKE ? LIMIT 40",
+                (f"%{w}%",),
+            ).fetchall()
+            for r in more:
+                if r["crc32"] not in seen:
+                    seen.add(r["crc32"])
+                    merged.append(r)
+        rows = merged
+
     conn.close()
 
     scored = sorted(
