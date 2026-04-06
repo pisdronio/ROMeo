@@ -1400,6 +1400,9 @@ function _pbpUndo(idx) {
   _pbpRenderAll();
 }
 
+// Keyed by idx — stores last search results so event listeners can look them up
+const _pbpSearchCache = {};
+
 async function _pbpSearch(idx) {
   const input     = document.getElementById(`pbp-q-${idx}`);
   const resultsEl = document.getElementById(`pbp-results-${idx}`);
@@ -1413,19 +1416,26 @@ async function _pbpSearch(idx) {
     resultsEl.innerHTML = `<div class="muted" style="font-size:11px;padding:4px 0;">No results</div>`;
     return;
   }
+  // Cache by crc32 so click handler can retrieve full object safely
+  _pbpSearchCache[idx] = {};
+  cands.forEach(c => { _pbpSearchCache[idx][c.crc32] = c; });
+
   resultsEl.innerHTML = cands.map(c => {
     const pct        = Math.round((c.score || 0) * 100);
     const scoreClass = pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
-    const nameJ      = JSON.stringify(c.name);
-    const conJ       = JSON.stringify(c.console || '');
-    const regJ       = JSON.stringify(c.region  || '');
-    return `<div class="pbp-candidate"
-      onclick="_pbpPickResult(${idx},'${c.crc32}',${nameJ},${conJ},${regJ})">
+    return `<div class="pbp-candidate" data-crc="${esc(c.crc32)}">
       <span class="pbp-match-score ${scoreClass}">${pct}%</span>
       <span class="pbp-cand-name">${esc(c.name)}</span>
       <span class="pbp-cand-meta muted">${esc(c.region || '')}${c.region && c.console ? ' · ' : ''}${esc(c.console || '')}</span>
     </div>`;
   }).join('');
+
+  resultsEl.querySelectorAll('.pbp-candidate').forEach(el => {
+    el.addEventListener('click', () => {
+      const c = (_pbpSearchCache[idx] || {})[el.dataset.crc];
+      if (c) _pbpPickResult(idx, c.crc32, c.name, c.console || '', c.region || '');
+    });
+  });
 }
 
 function _pbpPickResult(idx, crc32, name, console_, region) {
