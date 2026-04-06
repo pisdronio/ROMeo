@@ -14,7 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.scanner import scan_for_crcs, detect_console
+from core.scanner import scan_for_crcs, detect_console, compute_crc32_candidates
 from core.dats import (dat_status, download_dat, LIBRETRO_DATS,
                         invalidate_cache, dat_to_game_entries, load_all_dats, get_dat)
 from core.db import (upsert_games, bulk_add_collection,
@@ -22,6 +22,7 @@ from core.db import (upsert_games, bulk_add_collection,
                      clear_catalog, save_scan, get_recent_scans)
 from core.fileops import (safe_trash, restore_from_trash, empty_trash,
                            trash_contents, export_library, preview_export)
+from core.converter import convert_file, ALL_CONVERTIBLE, MANUAL_CONVERTIBLE
 
 app = Flask(__name__, static_folder="static")
 
@@ -35,6 +36,7 @@ KNOWN_CONSOLES = {
     "N64":          "Nintendo 64",
     "GameCube":     "GameCube",
     "Wii":          "Wii",
+    "WiiU":         "Wii U",
     "FDS":          "Famicom Disk System",
     "Satellaview":  "Satellaview",
     "SufamiTurbo":  "Sufami Turbo",
@@ -48,7 +50,9 @@ KNOWN_CONSOLES = {
     # Sony
     "PS1":          "PlayStation",
     "PS2":          "PlayStation 2",
+    "PS3":          "PlayStation 3",
     "PSP":          "PlayStation Portable",
+    "PSMinis":      "PlayStation Minis",
     # Sega
     "Genesis":      "Genesis / Mega Drive",
     "Sega32X":      "Sega 32X",
@@ -66,6 +70,7 @@ KNOWN_CONSOLES = {
     "PCE":          "PC Engine",
     "PCECD":        "PC Engine CD",
     "SuperGrafx":   "SuperGrafx",
+    "PC98":         "PC-98",
     # Atari
     "Atari2600":    "Atari 2600",
     "Atari5200":    "Atari 5200",
@@ -78,14 +83,20 @@ KNOWN_CONSOLES = {
     "CPS1":         "CPS1",
     "CPS2":         "CPS2",
     "CPS3":         "CPS3",
+    # Arcade
+    "MAME":         "MAME / Arcade",
+    "Atomiswave":   "Atomiswave",
+    "HBMAME":       "HBMAME",
     # Home computers
     "Amiga":        "Amiga",
+    "CD32":         "Amiga CD32",
     "C64":          "Commodore 64",
     "AmstradCPC":   "Amstrad CPC",
     "MSX":          "MSX",
     "ZXSpectrum":   "ZX Spectrum",
+    "ZX81":         "ZX Spectrum 81",
     "DOS":          "DOS",
-    # Other
+    # Other hardware
     "Vectrex":      "Vectrex",
     "ColecoVision": "ColecoVision",
     "Intellivision":"Intellivision",
@@ -93,16 +104,41 @@ KNOWN_CONSOLES = {
     "FairchildF":   "Fairchild Channel F",
     "MegaDuck":     "Mega Duck",
     "Supervision":  "Supervision",
-    "ScummVM":      "ScummVM",
-    "TIC80":        "TIC-80",
+    # Fantasy / indie consoles
     "PICO-8":       "PICO-8",
-    "MAME":         "MAME / Arcade",
+    "TIC80":        "TIC-80",
+    "LowResNX":     "LowRes NX",
+    "Arduboy":      "Arduboy",
+    "CHIP8":        "CHIP-8",
+    "Uzebox":       "Uzebox",
+    "Vircon32":     "Vircon32",
+    "WASM4":        "WASM-4",
+    "MicroW8":      "MicroW8",
+    # Game engines / ports
+    "ScummVM":      "ScummVM",
+    "DOOM":         "DOOM",
+    "Quake":        "Quake",
+    "QuakeII":      "Quake II",
+    "QuakeIII":     "Quake III",
+    "Wolfenstein3D":"Wolfenstein 3D",
+    "TombRaider":   "Tomb Raider",
+    "Flashback":    "Flashback",
+    "CaveStory":    "Cave Story",
+    "RPGMaker":     "RPG Maker",
+    "ChaiLove":     "ChaiLove",
+    "Lutro":        "Lutro",
+    "PuzzleScript": "PuzzleScript",
+    "ZMachine":     "Z-Machine",
 }
 
 scan_progress = {"status": "idle", "current": 0, "total": 0,
                  "file": "", "scan_id": None, "matched": 0,
-                 "unmatched_by_console": {}}
+                 "unmatched_by_console": {}, "convertible": []}
 scan_lock = threading.Lock()
+
+convert_progress = {"status": "idle", "current": 0, "total": 0,
+                    "file": "", "results": [], "converted_paths": []}
+convert_lock = threading.Lock()
 
 dat_progress = {"status": "idle", "message": "", "done": [], "failed": []}
 dat_lock = threading.Lock()
@@ -112,7 +148,14 @@ dat_lock = threading.Lock()
 
 @app.route("/api/version")
 def get_version():
-    return jsonify({"version": VERSION})
+    from core.scanner import _find_chdman
+    return jsonify({"version": VERSION, "chdman": bool(_find_chdman())})
+
+
+@app.route("/api/tools")
+def tools_status():
+    from core.scanner import _find_chdman
+    return jsonify({"chdman": _find_chdman() or None})
 
 
 # ── Static ────────────────────────────────────────────────────────────────────
@@ -131,10 +174,19 @@ def static_files(path):
 @app.route("/api/scan", methods=["POST"])
 def start_scan():
     data = request.json or {}
-    root = data.get("path", "").strip()
+    root      = data.get("path", "").strip()
+    files_in  = data.get("files", [])    # explicit individual files
+    folders_in = data.get("folders", []) # multiple folders
 
-    if not root or not os.path.isdir(root):
-        return jsonify({"ok": False, "error": "Invalid directory path"}), 400
+    # Normalize: single path → folders list
+    if root:
+        folders_in = [root] + [f for f in folders_in if f != root]
+
+    if not folders_in and not files_in:
+        return jsonify({"ok": False, "error": "Provide a folder path or file list"}), 400
+    for folder in folders_in:
+        if not os.path.isdir(folder):
+            return jsonify({"ok": False, "error": f"Not a directory: {folder}"}), 400
 
     with scan_lock:
         if scan_progress["status"] == "scanning":
@@ -160,36 +212,83 @@ def start_scan():
             # Load all available DATs into one flat CRC32 lookup
             global_dat = load_all_dats()
 
-            files = scan_for_crcs(root, progress_cb=progress_cb)
+            from core.scanner import KNOWN_EXTENSIONS, scan_for_crcs
+
+            if folders_in and not files_in:
+                # Pure folder scan (original fast path)
+                if len(folders_in) == 1:
+                    files = scan_for_crcs(folders_in[0], progress_cb=progress_cb)
+                else:
+                    files = []
+                    for folder in folders_in:
+                        files += scan_for_crcs(folder, progress_cb=progress_cb)
+            else:
+                # Individual files (+ optional folder expansion)
+                all_paths = list(files_in)
+                for folder in folders_in:
+                    folder_files = scan_for_crcs(folder)
+                    all_paths += [f["path"] for f in folder_files]
+
+                valid = [p for p in dict.fromkeys(all_paths)  # deduplicate, preserve order
+                         if Path(p).suffix.lower() in KNOWN_EXTENSIONS]
+                total = len(valid)
+                scanned = []
+                for i, p in enumerate(valid):
+                    progress_cb(i + 1, total, p)
+                    fp = Path(p)
+                    size = fp.stat().st_size if fp.exists() else 0
+                    if size < 2 * 1024 * 1024 * 1024:
+                        crcs = compute_crc32_candidates(fp)
+                    else:
+                        crcs = []
+                    primary = crcs[0] if crcs else ""
+                    scanned.append({"path": p, "crc32": primary, "crcs": crcs, "size": size})
+                files = scanned
 
             now = datetime.now().isoformat()
-            matches = [
-                {"crc32": f["crc32"], "rom_path": f["path"], "scanned_at": now}
-                for f in files
-                if f["crc32"] and f["crc32"] in global_dat
-            ]
+            matches = []
+            for f in files:
+                candidates = f.get("crcs") or ([f["crc32"]] if f.get("crc32") else [])
+                for key in candidates:
+                    if key and key in global_dat:
+                        entry = global_dat[key]
+                        # For SHA1-keyed entries (CHD), use the original DAT CRC32
+                        real_crc = entry.get("real_crc32", key)
+                        matches.append({"crc32": real_crc, "rom_path": f["path"], "scanned_at": now})
+                        break  # one match per file is enough
 
             # Track unmatched files grouped by detected console + extensions
             unmatched_by_console: dict = {}
+            convertible: list = []
+            matched_paths = {m["rom_path"] for m in matches}
             for f in files:
-                if not f["crc32"] or f["crc32"] not in global_dat:
+                if f["path"] not in matched_paths:
                     p   = Path(f["path"])
+                    ext = p.suffix.lower()
                     con = detect_console(p)
                     if con and con != "Unknown":
                         entry = unmatched_by_console.setdefault(con, {"count": 0, "exts": {}})
                         entry["count"] += 1
-                        ext = p.suffix.lower()
                         entry["exts"][ext] = entry["exts"].get(ext, 0) + 1
+                    if ext in ALL_CONVERTIBLE:
+                        convertible.append({
+                            "path": f["path"],
+                            "ext":  ext,
+                            "manual": ext in MANUAL_CONVERTIBLE,
+                            "note":  MANUAL_CONVERTIBLE.get(ext, ""),
+                        })
 
             bulk_add_collection(matches)
             finished = datetime.now().isoformat()
-            save_scan(scan_id, root, started, finished, len(files), len(matches), "done")
+            scan_label = folders_in[0] if len(folders_in) == 1 and not files_in else f"{len(files)} files scanned"
+            save_scan(scan_id, scan_label, started, finished, len(files), len(matches), "done")
 
             with scan_lock:
                 scan_progress["status"] = "done"
                 scan_progress["total"] = len(files)
                 scan_progress["matched"] = len(matches)
                 scan_progress["unmatched_by_console"] = unmatched_by_console
+                scan_progress["convertible"] = convertible
 
         except Exception as e:
             with scan_lock:
@@ -204,6 +303,59 @@ def start_scan():
 def scan_progress_endpoint():
     with scan_lock:
         return jsonify(dict(scan_progress))
+
+
+# ── Convert ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/convert", methods=["POST"])
+def start_convert():
+    data  = request.json or {}
+    paths = data.get("paths", [])
+    if not paths:
+        return jsonify({"ok": False, "error": "No files provided"}), 400
+
+    with convert_lock:
+        if convert_progress["status"] == "converting":
+            return jsonify({"ok": False, "error": "Conversion already running"}), 409
+
+    def run():
+        with convert_lock:
+            convert_progress.update({
+                "status": "converting", "current": 0,
+                "total": len(paths), "file": "",
+                "results": [], "converted_paths": [],
+            })
+
+        results = []
+        converted = []
+        for i, p in enumerate(paths):
+            src = Path(p)
+            with convert_lock:
+                convert_progress["current"] = i + 1
+                convert_progress["file"]    = src.name
+
+            def _prog(cur, tot):
+                pass  # block-level progress not surfaced to UI (file-level is enough)
+
+            ok, msg, out = convert_file(src, _prog)
+            results.append({"path": p, "ok": ok, "msg": msg,
+                             "output": str(out) if out else None})
+            if ok and out:
+                converted.append(str(out))
+
+        with convert_lock:
+            convert_progress["status"]          = "done"
+            convert_progress["results"]         = results
+            convert_progress["converted_paths"] = converted
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/convert/progress")
+def convert_progress_endpoint():
+    with convert_lock:
+        return jsonify(dict(convert_progress))
 
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
@@ -270,6 +422,28 @@ def browse_file():
     if result.returncode != 0:
         return jsonify({"ok": False, "path": None})
     return jsonify({"ok": True, "path": result.stdout.strip()})
+
+
+@app.route("/api/browse/files")
+def browse_files():
+    """Open a multi-file picker for ROM files."""
+    import subprocess
+    script = (
+        'set chosen to choose file with prompt "Select ROM files" '
+        'with multiple selections allowed\n'
+        'set posixPaths to {}\n'
+        'repeat with f in chosen\n'
+        '  set end of posixPaths to POSIX path of f\n'
+        'end repeat\n'
+        'set AppleScript\'s text item delimiters to "\\n"\n'
+        'return posixPaths as text'
+    )
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    _refocus_browser()
+    if result.returncode != 0:
+        return jsonify({"ok": False, "paths": []})
+    paths = [p.strip() for p in result.stdout.strip().splitlines() if p.strip()]
+    return jsonify({"ok": True, "paths": paths})
 
 
 # ── Trash / File ops ──────────────────────────────────────────────────────────
@@ -617,6 +791,23 @@ def dats_import():
     upsert_games(entries)
 
     return jsonify({"ok": True, "console": console, "entries": len(dat)})
+
+
+@app.route("/api/dats/delete", methods=["POST"])
+def dats_delete():
+    import shutil
+    from core.dats import DAT_DIR
+    data    = request.json or {}
+    console = data.get("console", "").strip()
+    if not console:
+        return jsonify({"ok": False, "error": "No console specified"}), 400
+    dest = DAT_DIR / f"{console}.dat"
+    if not dest.exists():
+        return jsonify({"ok": False, "error": "DAT not found"}), 404
+    dest.unlink()
+    invalidate_cache(console)
+    clear_catalog(console=console)
+    return jsonify({"ok": True})
 
 
 # ── History ───────────────────────────────────────────────────────────────────

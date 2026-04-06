@@ -210,6 +210,9 @@ function renderGroupCard(g) {
 
 let scanTimer = null;
 
+// Unified scan queue: each entry is {type:'folder'|'file', path:string}
+let _scanQueue = [];
+
 function renderScan() {
   const view = document.getElementById("view-scan");
   view.innerHTML = `
@@ -218,14 +221,18 @@ function renderScan() {
     </div>
     <div class="scan-form">
       <div class="form-group">
-        <label class="form-label">ROM Folder Path</label>
-        <div style="display:flex;gap:8px;">
-          <input class="form-input" id="scan-path" placeholder="/Volumes/ROMs or ~/Desktop/roms" style="flex:1;">
-          <button class="btn" id="btn-browse">Browse…</button>
+        <label class="form-label">What to scan</label>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button class="btn" id="btn-browse">+ Folder</button>
+          <button class="btn" id="btn-browse-files">+ Files</button>
+          <button class="btn" id="btn-clear-queue" style="margin-left:auto;display:none;">✕ Clear all</button>
         </div>
-        <div class="form-hint">ROMeo will scan all ROM files and match them against your loaded DAT catalog. Load DATs first in the <strong>DAT Files</strong> tab.</div>
+        <div id="scan-queue-list" class="picked-files-list">
+          <div class="muted" id="scan-queue-empty" style="font-size:12px;padding:6px 0;">No folders or files added yet.</div>
+        </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <div class="form-hint">Add folders (scanned recursively) and/or individual ROM files. Match against your loaded DAT catalog.</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;">
         <button class="btn primary" id="btn-scan">Start Scan</button>
         <select class="filter-sel" id="clear-console-sel" style="min-width:140px;">
           <option value="">All consoles</option>
@@ -244,14 +251,38 @@ function renderScan() {
     </div>
   `;
 
+  _scanQueue = [];
+
   document.getElementById("btn-scan").addEventListener("click", startScan);
 
   document.getElementById("btn-browse").addEventListener("click", async () => {
     const btn = document.getElementById("btn-browse");
     btn.disabled = true; btn.textContent = "Picking…";
     const res = await API.get("/api/browse");
-    btn.disabled = false; btn.textContent = "Browse…";
-    if (res.ok && res.path) document.getElementById("scan-path").value = res.path;
+    btn.disabled = false; btn.textContent = "+ Folder";
+    if (res.ok && res.path && !_scanQueue.find(e => e.path === res.path)) {
+      _scanQueue.push({ type: "folder", path: res.path });
+      updateScanQueueUI();
+    }
+  });
+
+  document.getElementById("btn-browse-files").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-browse-files");
+    btn.disabled = true; btn.textContent = "Picking…";
+    const res = await API.get("/api/browse/files");
+    btn.disabled = false; btn.textContent = "+ Files";
+    if (res.ok && res.paths && res.paths.length) {
+      for (const p of res.paths) {
+        if (!_scanQueue.find(e => e.path === p))
+          _scanQueue.push({ type: "file", path: p });
+      }
+      updateScanQueueUI();
+    }
+  });
+
+  document.getElementById("btn-clear-queue").addEventListener("click", () => {
+    _scanQueue = [];
+    updateScanQueueUI();
   });
 
   // Populate clear console dropdown
@@ -268,7 +299,15 @@ function renderScan() {
     const sel      = document.getElementById("clear-console-sel");
     const console_ = sel.value;
     const label    = console_ ? `${console_} catalog` : "entire catalog";
-    if (!confirm(`Clear ${label}? You can re-import DATs and re-scan.`)) return;
+    const btn = document.getElementById("btn-clear-catalog");
+    if (btn.dataset.armed !== label) {
+      btn.dataset.armed = label;
+      btn.textContent = "sure?";
+      setTimeout(() => { btn.textContent = "Clear Catalog"; delete btn.dataset.armed; }, 3000);
+      return;
+    }
+    delete btn.dataset.armed;
+    btn.textContent = "Clear Catalog";
     await API.post("/api/catalog/clear", console_ ? { console: console_ } : {});
     refreshStats();
     toast(`${console_ || "Catalog"} cleared`, "ok");
@@ -277,11 +316,51 @@ function renderScan() {
   loadRecentScans();
 }
 
-async function startScan() {
-  const path = document.getElementById("scan-path").value.trim();
-  if (!path) { toast("Please enter a path", "err"); return; }
+function updateScanQueueUI() {
+  const list     = document.getElementById("scan-queue-list");
+  const empty    = document.getElementById("scan-queue-empty");
+  const clearBtn = document.getElementById("btn-clear-queue");
+  if (!list) return;
+  if (_scanQueue.length === 0) {
+    empty.style.display = "";
+    clearBtn.style.display = "none";
+    list.querySelectorAll(".picked-file-row").forEach(el => el.remove());
+  } else {
+    empty.style.display = "none";
+    clearBtn.style.display = "";
+    list.querySelectorAll(".picked-file-row").forEach(el => el.remove());
+    _scanQueue.forEach((entry, i) => {
+      const icon = entry.type === "folder" ? "▦" : "◈";
+      const row = document.createElement("div");
+      row.className = "picked-file-row";
+      row.innerHTML = `<span style="opacity:.5;margin-right:6px;">${icon}</span><span class="mono">${esc(entry.path)}</span>
+        <button onclick="_scanQueue.splice(${i},1);updateScanQueueUI();" style="margin-left:auto;background:none;border:none;color:var(--fg3);cursor:pointer;font-size:11px;">✕</button>`;
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      list.appendChild(row);
+    });
+  }
+}
 
-  const res = await API.post("/api/scan", { path });
+async function startScan() {
+  if (_scanQueue.length === 0) { toast("Add a folder or files first", "err"); return; }
+
+  const folders = _scanQueue.filter(e => e.type === "folder").map(e => e.path);
+  const files   = _scanQueue.filter(e => e.type === "file").map(e => e.path);
+
+  // If only one folder and no individual files, use simple path mode
+  let payload;
+  if (folders.length === 1 && files.length === 0) {
+    payload = { path: folders[0] };
+  } else if (folders.length === 0 && files.length > 0) {
+    payload = { files };
+  } else {
+    // Mixed: expand folders on backend too — pass both
+    payload = { files, folders };
+  }
+
+  const res = await API.post("/api/scan", payload);
+  if (!res.ok) { toast(res.error, "err"); return; }
   if (!res.ok) { toast(res.error, "err"); return; }
 
   document.getElementById("scan-progress-wrap").classList.add("visible");
@@ -312,11 +391,57 @@ async function pollScan() {
     const matched = p.matched || 0;
     label.textContent = `Done — ${matched} matched / ${p.total} files`;
     document.getElementById("btn-scan").disabled = false;
+
+    const convertible = p.convertible || [];
+    const autoFiles   = convertible.filter(f => !f.manual);
+    const manualFiles = convertible.filter(f => f.manual);
+
+    let convertHtml = "";
+    if (convertible.length > 0) {
+      const autoSection = autoFiles.length ? `
+        <div class="convert-group">
+          <div class="convert-group-label">⚡ Auto-convertible (${autoFiles.length} files)</div>
+          ${autoFiles.map(f => `
+            <div class="convert-file-row">
+              <span class="convert-ext-badge">${f.ext}</span>
+              <span class="convert-file-name mono">${esc(f.path.split("/").pop())}</span>
+            </div>`).join("")}
+          <button class="btn primary convert-run-btn" onclick="startConvert(${JSON.stringify(autoFiles.map(f => f.path))})">
+            Convert ${autoFiles.length} file${autoFiles.length > 1 ? "s" : ""} → ISO
+          </button>
+        </div>` : "";
+
+      const manualSection = manualFiles.length ? `
+        <div class="convert-group">
+          <div class="convert-group-label">⚠ Manual conversion needed (${manualFiles.length} files)</div>
+          ${[...new Set(manualFiles.map(f => f.ext))].map(ext => {
+            const group = manualFiles.filter(f => f.ext === ext);
+            return `<div class="convert-manual-note">
+              <span class="convert-ext-badge">${ext}</span>
+              <span>${group.length} file${group.length > 1 ? "s" : ""} · ${esc(group[0].note)}</span>
+            </div>`;
+          }).join("")}
+        </div>` : "";
+
+      convertHtml = `
+        <div class="convert-card">
+          <div class="convert-card-title">Files needing conversion</div>
+          <div class="convert-card-sub">These formats can't be matched directly. Convert them first, then rescan.</div>
+          ${autoSection}${manualSection}
+          <div id="convert-progress-wrap" class="progress-wrap" style="display:none;margin-top:12px;">
+            <div class="progress-bar-bg"><div class="progress-bar-fill" id="convert-bar"></div></div>
+            <div class="progress-label" id="convert-label">Converting…</div>
+          </div>
+          <div id="convert-result"></div>
+        </div>`;
+    }
+
     document.getElementById("scan-result").innerHTML = `
       <div class="badge ok" style="padding:8px 14px;font-size:13px;">
         ✓ ${matched.toLocaleString()} ROMs added to collection
-        ${p.total - matched > 0 ? `<span class="muted" style="margin-left:8px;">(${(p.total-matched).toLocaleString()} not in any DAT)</span>` : ''}
-      </div>`;
+        ${p.total - matched > 0 ? `<span class="muted" style="margin-left:8px;">(${(p.total-matched).toLocaleString()} not in any DAT)</span>` : ""}
+      </div>
+      ${convertHtml}`;
     refreshStats();
     loadRecentScans();
     toast(`${matched} ROMs matched`, "ok");
@@ -326,6 +451,69 @@ async function pollScan() {
     label.textContent = "Error: " + p.file;
     document.getElementById("btn-scan").disabled = false;
     toast("Scan error: " + p.file, "err");
+  }
+}
+
+let convertTimer = null;
+
+async function startConvert(paths) {
+  const btn = document.querySelector(".convert-run-btn");
+  if (btn) btn.disabled = true;
+
+  const res = await API.post("/api/convert", { paths });
+  if (!res.ok) { toast(res.error || "Convert failed", "err"); return; }
+
+  const wrap = document.getElementById("convert-progress-wrap");
+  if (wrap) wrap.style.display = "block";
+
+  clearInterval(convertTimer);
+  convertTimer = setInterval(pollConvert, 700);
+}
+
+async function pollConvert() {
+  const p     = await API.get("/api/convert/progress");
+  const bar   = document.getElementById("convert-bar");
+  const label = document.getElementById("convert-label");
+  if (!bar) { clearInterval(convertTimer); return; }
+
+  if (p.total > 0) {
+    const pct = Math.round(p.current / p.total * 100);
+    bar.style.width = pct + "%";
+    label.textContent = `${pct}% · ${p.file}`;
+  }
+
+  if (p.status === "done") {
+    clearInterval(convertTimer);
+    bar.style.width = "100%";
+    const ok  = p.results.filter(r => r.ok).length;
+    const bad = p.results.filter(r => !r.ok).length;
+    label.textContent = `Done — ${ok} converted${bad ? `, ${bad} failed` : ""}`;
+
+    const resultEl = document.getElementById("convert-result");
+    if (resultEl) {
+      resultEl.innerHTML = p.results.map(r => `
+        <div class="convert-result-row ${r.ok ? "ok" : "err"}">
+          <span>${r.ok ? "✓" : "✗"}</span>
+          <span class="mono" style="font-size:11px;">${esc(r.path.split("/").pop())}</span>
+          <span class="muted" style="font-size:11px;">${esc(r.msg)}</span>
+        </div>`).join("");
+    }
+
+    if (ok > 0 && p.converted_paths.length > 0) {
+      // Add converted files to the scan queue and offer rescan
+      p.converted_paths.forEach(fp => {
+        if (!_scanQueue.find(e => e.path === fp))
+          _scanQueue.push({ type: "file", path: fp });
+      });
+      updateScanQueueUI();
+      toast(`${ok} files converted — added to scan queue`, "ok");
+    }
+  }
+
+  if (p.status === "error") {
+    clearInterval(convertTimer);
+    if (label) label.textContent = "Conversion error";
+    toast("Conversion error", "err");
   }
 }
 
@@ -758,7 +946,15 @@ async function renderTrash() {
   `;
 
   document.getElementById("btn-empty-trash").addEventListener("click", async () => {
-    if (!confirm("Permanently delete all trashed ROMs? This cannot be undone.")) return;
+    const emptyBtn = document.getElementById("btn-empty-trash");
+    if (!emptyBtn.dataset.armed) {
+      emptyBtn.dataset.armed = "1";
+      emptyBtn.textContent = "sure?";
+      setTimeout(() => { emptyBtn.textContent = "Empty Trash"; delete emptyBtn.dataset.armed; }, 3000);
+      return;
+    }
+    delete emptyBtn.dataset.armed;
+    emptyBtn.textContent = "Empty Trash";
     const res = await API.post("/api/trash/empty", {});
     toast(`Deleted ${res.deleted} files`, res.ok ? "ok" : "err");
     renderTrash();
@@ -789,6 +985,8 @@ async function loadTrash() {
 
 // ── DAT Files view ────────────────────────────────────────────────────────────
 
+let _datShowAll = false;
+
 const ALL_CONSOLES = [
   "NES","SNES","GB","GBC","GBA","N64","NDS","GameCube","Wii",
   "PS1","PS2","PSP","Dreamcast","Saturn","Genesis","MasterSys",
@@ -805,7 +1003,7 @@ async function renderDats() {
     <div class="toolbar">
       <button class="btn primary" id="btn-dl-all">Download Available DATs</button>
       <button class="btn" id="btn-rebuild-catalog" title="Re-import all DAT files — fixes numbered names and duplicate groups">⟳ Rebuild Catalog</button>
-      <span class="muted" style="font-size:11px;">No-Intro databases via libretro-database.</span>
+      <button class="btn" id="btn-toggle-bookshelf" style="margin-left:auto;">Show All Consoles</button>
     </div>
     <div style="padding:12px 24px 16px;border-bottom:1px solid var(--line);">
       <div class="form-label" style="margin-bottom:8px;">Import DAT File</div>
@@ -837,6 +1035,13 @@ async function renderDats() {
     btn.disabled = false; btn.textContent = "⟳ Rebuild Catalog";
     refreshStats();
     toast("Catalog rebuilt — names and groups updated", "ok");
+  });
+
+  document.getElementById("btn-toggle-bookshelf").addEventListener("click", () => {
+    _datShowAll = !_datShowAll;
+    document.getElementById("btn-toggle-bookshelf").textContent =
+      _datShowAll ? "Show Loaded Only" : "Show All Consoles";
+    loadDatStatus(_datShowAll);
   });
 
   // Auto-detect console when a file path is entered/pasted
@@ -892,17 +1097,17 @@ async function renderDats() {
       _detectedConsole = "";
       btn.disabled = true;
       toast(`${res.console} catalog loaded`, "ok");
-      loadDatStatus();
+      loadDatStatus(_datShowAll);
       refreshStats();
     } else {
       toast(res.error || "Import failed", "err");
     }
   });
 
-  loadDatStatus();
+  loadDatStatus(_datShowAll);
 }
 
-async function loadDatStatus() {
+async function loadDatStatus(showAll = false) {
   const [status, unmatched] = await Promise.all([
     API.get("/api/dats/status"),
     API.get("/api/scan/unmatched"),
@@ -915,9 +1120,10 @@ async function loadDatStatus() {
   const manual   = [];
 
   for (const [con, info] of Object.entries(status)) {
-    if (info.available)        loaded.push([con, info]);
-    else if (info.downloadable) download.push([con, info]);
-    else                        manual.push([con, info]);
+    if (info.available)             loaded.push([con, info]);
+    else if (!showAll)              continue;   // hide unloaded when in "loaded only" mode
+    else if (info.downloadable)     download.push([con, info]);
+    else                            manual.push([con, info]);
   }
   const sortName = ([a], [b]) => a.localeCompare(b);
   loaded.sort(sortName); download.sort(sortName); manual.sort(sortName);
@@ -951,6 +1157,10 @@ async function loadDatStatus() {
       }
     }
 
+    const deleteBtn = info.available
+      ? `<button class="dat-delete-btn" data-console="${esc(con)}" title="Remove DAT">✕</button>`
+      : "";
+
     return `
     <div class="dat-card ${info.available ? 'available' : ''} ${unmatchedCount ? 'has-unmatched' : ''}">
       ${iconEl}
@@ -961,6 +1171,7 @@ async function loadDatStatus() {
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
         <div class="dat-dot ${info.available ? 'available' : ''}"></div>
         ${badge}
+        ${deleteBtn}
       </div>
     </div>`;
   }
@@ -975,6 +1186,43 @@ async function loadDatStatus() {
     section("Loaded", loaded) +
     section("Available to Download", download) +
     section("Import Manually", manual);
+
+  let _pendingDelete = null;
+  grid.querySelectorAll(".dat-delete-btn").forEach(btn => {
+    btn.addEventListener("click", async e => {
+      e.stopPropagation();
+      const console_ = btn.dataset.console;
+      if (_pendingDelete !== console_) {
+        // First click — arm it
+        if (_pendingDelete) {
+          // Reset previously armed button
+          const prev = grid.querySelector(`.dat-delete-btn[data-console="${_pendingDelete}"]`);
+          if (prev) { prev.textContent = "✕"; prev.classList.remove("armed"); }
+        }
+        _pendingDelete = console_;
+        btn.textContent = "sure?";
+        btn.classList.add("armed");
+        // Auto-cancel after 3s
+        setTimeout(() => {
+          if (_pendingDelete === console_) {
+            btn.textContent = "✕"; btn.classList.remove("armed");
+            _pendingDelete = null;
+          }
+        }, 3000);
+      } else {
+        // Second click — confirm delete
+        const res = await API.post("/api/dats/delete", { console: console_ });
+        _pendingDelete = null;
+        if (res.ok) {
+          toast(`${console_} DAT removed`, "ok");
+          loadDatStatus(_datShowAll);
+          refreshStats();
+        } else {
+          toast(res.error || "Delete failed", "err");
+        }
+      }
+    });
+  });
 }
 
 let datTimer = null;
@@ -996,7 +1244,7 @@ async function downloadAllDats() {
       document.getElementById("dat-bar").style.width = "100%";
       document.getElementById("dat-label").textContent = `Done — ${done} DATs downloaded`;
       document.getElementById("btn-dl-all").disabled = false;
-      loadDatStatus();
+      loadDatStatus(_datShowAll);
       refreshStats();
       toast(`Downloaded ${done} DATs`, "ok");
     }

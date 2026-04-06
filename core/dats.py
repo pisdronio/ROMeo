@@ -20,13 +20,59 @@ NOINTRO_DAT_URL = "https://datomatic.no-intro.org/dat-pack/?content=daily"
 LIBRETRO_DB_BASE = "https://raw.githubusercontent.com/libretro/libretro-database/master/dat"
 
 LIBRETRO_DATS = {
-    "NES":      "Nintendo - Nintendo Entertainment System.dat",
-    "SNES":     "Nintendo - Super Nintendo Entertainment System.dat",
-    "GameCube": "Nintendo - GameCube.dat",
-    "Wii":      "Nintendo - Wii.dat",
-    "Saturn":   "Sega - Saturn.dat",
-    "NeoGeo":   "SNK - Neo Geo.dat",
-    "PICO-8":   "PICO-8.dat",
+    # Nintendo
+    "NES":          "Nintendo - Nintendo Entertainment System.dat",
+    "SNES":         "Nintendo - Super Nintendo Entertainment System.dat",
+    "GameCube":     "Nintendo - GameCube.dat",
+    "Wii":          "Nintendo - Wii.dat",
+    "WiiU":         "Nintendo - Wii U.dat",
+    # Sega
+    "Saturn":       "Sega - Saturn.dat",
+    # SNK
+    "NeoGeo":       "SNK - Neo Geo.dat",
+    # NEC
+    "PC98":         "NEC - PC-98.dat",
+    # Sony
+    "PS3":          "Sony - PlayStation 3.dat",
+    "PSMinis":      "Sony - PlayStation Minis.dat",
+    # Commodore
+    "Amiga":        "Commodore - Amiga.dat",
+    "CD32":         "Commodore - CD32.dat",
+    # Sinclair
+    "ZXSpectrum":   "Sinclair - ZX Spectrum.dat",
+    "ZX81":         "Sinclair - ZX 81.dat",
+    # Amstrad
+    "AmstradCPC":   "Amstrad - CPC.dat",
+    # DOS / ScummVM
+    "DOS":          "DOS.dat",
+    "ScummVM":      "ScummVM.dat",
+    # Arcade / MAME variants
+    "Atomiswave":   "Atomiswave.dat",
+    "HBMAME":       "HBMAME.dat",
+    # Indie / fantasy consoles
+    "PICO-8":       "PICO-8.dat",
+    "TIC80":        "TIC-80.dat",
+    "LowResNX":     "LowRes NX.dat",
+    "Arduboy":      "Arduboy Inc - Arduboy.dat",
+    "CHIP8":        "CHIP-8.dat",
+    "Uzebox":       "Uzebox.dat",
+    "Vircon32":     "Vircon32.dat",
+    "WASM4":        "WASM-4.dat",
+    "MicroW8":      "MicroW8.dat",
+    # Game engines / ports
+    "DOOM":         "DOOM.dat",
+    "Quake":        "Quake.dat",
+    "QuakeII":      "Quake II.dat",
+    "QuakeIII":     "Quake III.dat",
+    "Wolfenstein3D":"Wolfenstein 3D.dat",
+    "TombRaider":   "Tomb Raider.dat",
+    "Flashback":    "Flashback.dat",
+    "CaveStory":    "Cave Story.dat",
+    "RPGMaker":     "RPG Maker.dat",
+    "ChaiLove":     "ChaiLove.dat",
+    "Lutro":        "Lutro.dat",
+    "PuzzleScript": "PuzzleScript.dat",
+    "ZMachine":     "Infocom - Z-Machine.dat",
 }
 
 # In-memory cache: crc32 -> {name, size, md5}
@@ -128,6 +174,7 @@ def _parse_clrmame_dat(text: str, console: str) -> dict:
         elif in_game and game_name and s.startswith("rom ("):
             crc_m  = re.search(r'\bcrc\s+([0-9a-fA-F]+)\b', s, re.IGNORECASE)
             md5_m  = re.search(r'\bmd5\s+([0-9a-fA-F]{32})\b', s, re.IGNORECASE)
+            sha1_m = re.search(r'\bsha1\s+([0-9a-fA-F]{40})\b', s, re.IGNORECASE)
             size_m = re.search(r'\bsize\s+(\d+)\b', s)
             if crc_m:
                 crc = crc_m.group(1).lower().zfill(8)
@@ -135,6 +182,7 @@ def _parse_clrmame_dat(text: str, console: str) -> dict:
                     "name": game_name,
                     "size": int(size_m.group(1)) if size_m else 0,
                     "md5":  md5_m.group(1).lower() if md5_m else "",
+                    "sha1": sha1_m.group(1).lower() if sha1_m else "",
                 }
 
         elif s == ")":
@@ -149,7 +197,8 @@ def _parse_xml_dat(text: str, console: str) -> dict:
     db = {}
     try:
         root = ET.fromstring(text)
-        games = root.findall("game") or root.findall(".//game")
+        games = (root.findall("game") or root.findall(".//game") or
+                 root.findall("machine") or root.findall(".//machine"))
 
         # First pass: build id -> parent_id map
         # A game with no cloneofid is its own parent (use its own id).
@@ -166,12 +215,15 @@ def _parse_xml_dat(text: str, console: str) -> dict:
             gid       = game.get("id", "")
             parent_id = id_to_parent.get(gid, gid)
             for rom in game.findall("rom"):
-                crc = (rom.get("crc") or "").lower().zfill(8)
+                crc      = (rom.get("crc") or "").lower().zfill(8)
+                rom_name = (rom.get("name") or "")
                 if crc and crc != "00000000":
                     db[crc] = {
                         "name":      name,
+                        "rom_name":  rom_name,    # filename inside the game (e.g. "Game (Track 02).bin")
                         "size":      int(rom.get("size") or 0),
                         "md5":       (rom.get("md5") or "").lower(),
+                        "sha1":      (rom.get("sha1") or "").lower(),
                         "parent_id": parent_id,   # DAT-defined group
                     }
     except ET.ParseError as e:
@@ -229,14 +281,43 @@ def invalidate_cache(console: str = None):
         _dat_cache = {}
 
 
+# Matches Track 02, 03, …, 10, 11, … — but NOT Track 01 or Track 1.
+# Pattern: optional leading zeros, then a digit ≥ 2 (single) or any multi-digit ≥ 10.
+_TRACK_SKIP_RE = re.compile(r'\(Track\s+0*([2-9]|[1-9]\d+)\)', re.IGNORECASE)
+
+
 def dat_to_game_entries(console: str, dat: dict) -> list:
-    """Convert a parsed DAT {crc32: info} to game catalog entries."""
+    """
+    Convert a parsed DAT {crc32: info} to game catalog entries.
+
+    For multi-track Redump DATs, each <game> element has multiple <rom>
+    entries (one .cue + one per track).  We only add ONE catalog entry per
+    game to keep the library clean:
+      - Skip .cue ROM entries (they're indices, not game data)
+      - Skip Track 02, Track 03, … entries
+      - Keep Track 01 (or the only BIN for single-track games)
+    All track CRC32s are still stored in the raw DAT cache so scan
+    matching can find any track.
+    """
     from .scanner import detect_region, detect_bad_tags, detect_revision, normalize_title, strip_release_number
     entries = []
+
     for crc32, info in dat.items():
         raw_name = info.get("name", "")
         if not raw_name:
             continue
+
+        rom_name = info.get("rom_name", "")
+
+        # Skip CUE sheet entries — they're disc indices, not game data
+        if rom_name.lower().endswith(".cue"):
+            continue
+
+        # Skip non-primary tracks (Track 02, 03, …)
+        # Track 01 and single-BIN games pass through unchanged
+        if _TRACK_SKIP_RE.search(rom_name):
+            continue
+
         name = strip_release_number(raw_name)
 
         # Use DAT-provided parent_id as group key when available (XML DATs with cloneofid).
@@ -262,7 +343,11 @@ def dat_to_game_entries(console: str, dat: dict) -> list:
 
 
 def load_all_dats() -> dict:
-    """Build a flat crc32 -> {name, console, ...} lookup from all DAT files on disk."""
+    """
+    Build a flat lookup from all DAT files on disk.
+    Keys are either CRC32 hex strings or 'sha1:<hex>' for SHA1-indexed entries.
+    SHA1-keyed entries include 'real_crc32' so collection matching still uses the DAT CRC32.
+    """
     lookup = {}
     if not DAT_DIR.exists():
         return lookup
@@ -270,6 +355,13 @@ def load_all_dats() -> dict:
         console = dat_file.stem
         dat = get_dat(console)
         for crc32, info in dat.items():
+            entry = {**info, "console": console}
             if crc32 not in lookup:
-                lookup[crc32] = {**info, "console": console}
+                lookup[crc32] = entry
+            # Also index by SHA1 for CHD matching
+            sha1 = info.get("sha1", "")
+            if sha1:
+                sha1_key = f"sha1:{sha1}"
+                if sha1_key not in lookup:
+                    lookup[sha1_key] = {**entry, "real_crc32": crc32}
     return lookup

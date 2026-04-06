@@ -75,6 +75,13 @@ CREATE TABLE IF NOT EXISTS scans (
     status      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS hash_cache (
+    path        TEXT PRIMARY KEY,
+    size        INTEGER NOT NULL,
+    mtime       REAL NOT NULL,
+    crc32       TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_games_console ON games(console);
 CREATE INDEX IF NOT EXISTS idx_games_group   ON games(group_key);
 """
@@ -316,6 +323,28 @@ def save_scan(scan_id: str, root_path: str, started_at: str, finished_at: str,
         (id, root_path, started_at, finished_at, total_files, matched, status)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (scan_id, root_path, started_at, finished_at, total_files, matched, status))
+    conn.commit()
+    conn.close()
+
+
+def cache_get(path: str, size: int, mtime: float) -> str:
+    """Return cached CRC32 if path/size/mtime match, else ''."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT crc32 FROM hash_cache WHERE path=? AND size=? AND mtime=?",
+        (path, size, mtime)
+    ).fetchone()
+    conn.close()
+    return row["crc32"] if row else ""
+
+
+def cache_set(path: str, size: int, mtime: float, crc32: str):
+    """Store a computed CRC32 in the cache."""
+    conn = get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO hash_cache (path, size, mtime, crc32) VALUES (?,?,?,?)",
+        (path, size, mtime, crc32)
+    )
     conn.commit()
     conn.close()
 

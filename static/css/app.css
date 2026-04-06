@@ -531,6 +531,32 @@ select.filter-sel:focus { border-color: var(--purple); }
 .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px; }
 
+.scan-or-divider {
+  text-align: center;
+  color: var(--fg3);
+  font-size: 11px;
+  letter-spacing: .05em;
+  margin: 4px 0 16px;
+}
+.picked-files-list {
+  margin-top: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.picked-file-row {
+  font-size: 11px;
+  color: var(--fg2);
+  padding: 3px 6px;
+  background: var(--bg2);
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .progress-wrap { margin: 16px 0; display: none; }
 .progress-wrap.visible { display: block; }
 .progress-bar-bg {
@@ -624,6 +650,21 @@ input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px;
 .dat-entries { font-family: var(--font-mono); font-size: 10px; color: var(--text2); margin-top: 2px; }
 .dat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line2); flex-shrink: 0; }
 .dat-dot.available { background: var(--aqua); box-shadow: 0 0 6px var(--glow-a); }
+.dat-delete-btn {
+  background: none;
+  border: none;
+  color: var(--fg3);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity .15s, color .15s;
+}
+.dat-card:hover .dat-delete-btn { opacity: 1; }
+.dat-delete-btn:hover { color: var(--red, #ff4444); }
+.dat-delete-btn.armed { opacity: 1; color: var(--red, #ff4444); }
 
 /* ── Export view ─────────────────────────────────────────────────────── */
 
@@ -820,3 +861,81 @@ input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px;
 .gap8 { gap: 8px; }
 .muted { color: var(--text2); }
 .mono  { font-family: var(--font-mono); }
+
+/* ── Conversion panel ────────────────────────────────────────────────── */
+.convert-card {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: var(--bg1);
+}
+.convert-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg1);
+  margin-bottom: 3px;
+}
+.convert-card-sub {
+  font-size: 11px;
+  color: var(--text2);
+  margin-bottom: 12px;
+}
+.convert-group {
+  margin-bottom: 12px;
+}
+.convert-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+.convert-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.convert-manual-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text1);
+}
+.convert-ext-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  color: var(--purple);
+  flex-shrink: 0;
+}
+.convert-file-name {
+  color: var(--text1);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.convert-run-btn {
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 6px 14px;
+}
+.convert-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.convert-result-row.ok { color: var(--aqua); }
+.convert-result-row.err { color: var(--red); }
