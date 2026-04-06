@@ -178,11 +178,14 @@ function renderGroupCard(g) {
       ? `<span class="vrow-path">${esc(v.rom_path)}</span>`
       : `<span class="vrow-path missing">not in collection</span>`;
     const warn = v.bad_tags ? `<span class="badge issues" style="font-size:9px;margin-left:4px;">⚠ ${esc(v.bad_tags)}</span>` : '';
+    const ext = v.rom_path ? v.rom_path.split('.').pop().toLowerCase() : '';
+    const fmtBadge = ext ? `<span class="fmt-badge ${ext}">${ext.toUpperCase()}</span>` : '';
     return `
       <div class="variant-row ${v.collected ? 'has' : ''}">
         <span class="vrow-dot" style="color:${v.collected ? 'var(--aqua)' : 'var(--text2)'}">${v.collected ? '●' : '○'}</span>
         <span class="vrow-name">${esc(v.name)}</span>
         ${warn}
+        ${fmtBadge}
         ${pathEl}
       </div>`;
   }).join("");
@@ -436,12 +439,15 @@ async function pollScan() {
         </div>`;
     }
 
+    const pbpFiles = p.pbp_files || [];
     document.getElementById("scan-result").innerHTML = `
       <div class="badge ok" style="padding:8px 14px;font-size:13px;">
         ✓ ${matched.toLocaleString()} ROMs added to collection
         ${p.total - matched > 0 ? `<span class="muted" style="margin-left:8px;">(${(p.total-matched).toLocaleString()} not in any DAT)</span>` : ""}
       </div>
-      ${convertHtml}`;
+      ${convertHtml}
+      <div id="pbp-panel"></div>`;
+    if (pbpFiles.length > 0) initPBPPanel(pbpFiles);
     refreshStats();
     loadRecentScans();
     toast(`${matched} ROMs matched`, "ok");
@@ -1228,6 +1234,7 @@ async function loadDatStatus(showAll = false) {
 let datTimer = null;
 
 async function downloadAllDats() {
+
   const res = await API.post("/api/dats/download", {});
   if (!res.ok) { toast(res.error, "err"); return; }
   document.getElementById("dat-dl-progress").style.display = "block";
@@ -1249,4 +1256,194 @@ async function downloadAllDats() {
       toast(`Downloaded ${done} DATs`, "ok");
     }
   }, 800);
+}
+
+
+// ── PBP Review Panel ──────────────────────────────────────────────────────────
+
+let _pbpItems = [];  // [{file, status:'pending'|'accepted'|'skipped', selected:candidate|null}]
+
+function initPBPPanel(pbpFiles) {
+  _pbpItems = pbpFiles.map(f => ({
+    file:     f,
+    status:   'pending',
+    selected: (f.candidates && f.candidates[0]) ? f.candidates[0] : null,
+  }));
+  _pbpRenderAll();
+}
+
+function _pbpRenderAll() {
+  const el = document.getElementById('pbp-panel');
+  if (!el) return;
+  const accepted = _pbpItems.filter(i => i.status === 'accepted').length;
+  const total    = _pbpItems.length;
+  el.innerHTML = `
+    <div class="pbp-panel">
+      <div class="pbp-panel-header">
+        <div class="pbp-panel-title">◈ ${total} PBP File${total !== 1 ? 's' : ''} Found</div>
+        <div class="pbp-panel-sub">Accept or search for each game to link it to your catalog without converting.</div>
+      </div>
+      <div class="pbp-items">
+        ${_pbpItems.map((item, idx) => _pbpRenderItem(item, idx)).join('')}
+      </div>
+      <div class="pbp-panel-footer">
+        <button class="btn primary" onclick="_pbpConfirmAll()" ${accepted === 0 ? 'disabled' : ''}>
+          ✓ Add ${accepted} to Collection
+        </button>
+        <button class="btn" onclick="_pbpDismiss()">Dismiss</button>
+        <span class="muted" style="font-size:11px;margin-left:auto;">${accepted} / ${total} accepted</span>
+      </div>
+    </div>`;
+}
+
+function _pbpRenderItem(item, idx) {
+  const f      = item.file;
+  const fname  = f.filename || f.path.split('/').pop();
+  const sfoTitle = f.sfo_title || '';
+
+  let bodyHtml = '';
+  if (item.status === 'accepted') {
+    const c = item.selected;
+    bodyHtml = `
+      <div class="pbp-accepted">
+        <span class="pbp-match-score high">✓</span>
+        <span class="pbp-cand-name">${esc(c.name)}</span>
+        <span class="pbp-cand-meta muted">${esc(c.region || '')}${c.region && c.console ? ' · ' : ''}${esc(c.console || '')}</span>
+        <button class="btn small" style="margin-left:auto;" onclick="_pbpUndo(${idx})">Undo</button>
+      </div>`;
+  } else if (item.status === 'skipped') {
+    bodyHtml = `
+      <div class="pbp-skipped muted">
+        — Skipped
+        <button class="btn small" style="margin-left:8px;" onclick="_pbpUndo(${idx})">Undo</button>
+      </div>`;
+  } else {
+    const candRows = (f.candidates || []).slice(0, 3).map((c, ci) => {
+      const pct       = Math.round((c.score || 0) * 100);
+      const cls       = item.selected && item.selected.crc32 === c.crc32 ? 'selected' : '';
+      const scoreClass = pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
+      return `<div class="pbp-candidate ${cls}" onclick="_pbpSelect(${idx}, ${ci})">
+        <span class="pbp-match-score ${scoreClass}">${pct}%</span>
+        <span class="pbp-cand-name">${esc(c.name)}</span>
+        <span class="pbp-cand-meta muted">${esc(c.region || '')}${c.region && c.console ? ' · ' : ''}${esc(c.console || '')}</span>
+      </div>`;
+    }).join('');
+
+    bodyHtml = `
+      <div class="pbp-candidates">
+        ${candRows || '<div class="muted" style="font-size:11px;padding:4px 0;">No match found — search below</div>'}
+      </div>
+      <div class="pbp-search-row">
+        <input class="form-input pbp-search-input" id="pbp-q-${idx}" placeholder="Search game…"
+          onkeydown="if(event.key==='Enter')_pbpSearch(${idx})">
+        <button class="btn small" onclick="_pbpSearch(${idx})">Search</button>
+      </div>
+      <div class="pbp-search-results" id="pbp-results-${idx}"></div>
+      <div class="pbp-item-actions">
+        <button class="btn small primary" onclick="_pbpAccept(${idx})" ${item.selected ? '' : 'disabled'}>
+          ✓ Accept${item.selected ? ' — ' + esc(item.selected.name.split(' (')[0].slice(0, 28)) : ''}
+        </button>
+        <button class="btn small" onclick="_pbpSkip(${idx})">Skip</button>
+      </div>`;
+  }
+
+  const statusColor = item.status === 'accepted' ? 'var(--aqua)'
+                    : item.status === 'skipped'  ? 'var(--text2)' : 'var(--orange)';
+  const statusDot   = item.status === 'accepted' ? '●'
+                    : item.status === 'skipped'  ? '—' : '○';
+
+  return `
+    <div class="pbp-item">
+      <div class="pbp-item-header">
+        <span class="pbp-status-dot" style="color:${statusColor}">${statusDot}</span>
+        <span class="fmt-badge pbp">PBP</span>
+        <span class="pbp-filename">${esc(fname)}</span>
+        ${sfoTitle ? `<span class="pbp-sfo-title muted">· ${esc(sfoTitle)}</span>` : ''}
+      </div>
+      ${bodyHtml}
+    </div>`;
+}
+
+function _pbpSelect(idx, ci) {
+  if (!_pbpItems[idx]) return;
+  _pbpItems[idx].selected = (_pbpItems[idx].file.candidates || [])[ci] || null;
+  _pbpRenderAll();
+}
+
+function _pbpAccept(idx) {
+  if (!_pbpItems[idx] || !_pbpItems[idx].selected) return;
+  _pbpItems[idx].status = 'accepted';
+  _pbpRenderAll();
+}
+
+function _pbpSkip(idx) {
+  if (!_pbpItems[idx]) return;
+  _pbpItems[idx].status = 'skipped';
+  _pbpRenderAll();
+}
+
+function _pbpUndo(idx) {
+  if (!_pbpItems[idx]) return;
+  _pbpItems[idx].status = 'pending';
+  _pbpRenderAll();
+}
+
+async function _pbpSearch(idx) {
+  const input     = document.getElementById(`pbp-q-${idx}`);
+  const resultsEl = document.getElementById(`pbp-results-${idx}`);
+  if (!input || !resultsEl) return;
+  const q = input.value.trim();
+  if (!q) return;
+  resultsEl.innerHTML = `<div class="muted" style="font-size:11px;padding:4px 0;">Searching…</div>`;
+  const res   = await API.post('/api/pbp/search', { title: q });
+  const cands = res.candidates || [];
+  if (!cands.length) {
+    resultsEl.innerHTML = `<div class="muted" style="font-size:11px;padding:4px 0;">No results</div>`;
+    return;
+  }
+  resultsEl.innerHTML = cands.map(c => {
+    const pct        = Math.round((c.score || 0) * 100);
+    const scoreClass = pct >= 90 ? 'high' : pct >= 70 ? 'mid' : 'low';
+    const nameJ      = JSON.stringify(c.name);
+    const conJ       = JSON.stringify(c.console || '');
+    const regJ       = JSON.stringify(c.region  || '');
+    return `<div class="pbp-candidate"
+      onclick="_pbpPickResult(${idx},'${c.crc32}',${nameJ},${conJ},${regJ})">
+      <span class="pbp-match-score ${scoreClass}">${pct}%</span>
+      <span class="pbp-cand-name">${esc(c.name)}</span>
+      <span class="pbp-cand-meta muted">${esc(c.region || '')}${c.region && c.console ? ' · ' : ''}${esc(c.console || '')}</span>
+    </div>`;
+  }).join('');
+}
+
+function _pbpPickResult(idx, crc32, name, console_, region) {
+  if (!_pbpItems[idx]) return;
+  _pbpItems[idx].selected = { crc32, name, console: console_, region };
+  _pbpRenderAll();
+}
+
+async function _pbpConfirmAll() {
+  const accepted = _pbpItems.filter(i => i.status === 'accepted');
+  if (!accepted.length) return;
+  const links = accepted.map(i => ({
+    pbp_path:   i.file.path,
+    game_crc32: i.selected.crc32,
+    sfo_title:  i.file.sfo_title || '',
+    sfo_id:     i.file.sfo_id    || '',
+  }));
+  const res = await API.post('/api/pbp/confirm', { links });
+  if (res.ok) {
+    toast(`${res.count} PBP${res.count !== 1 ? 's' : ''} added to collection`, 'ok');
+    refreshStats();
+    const el = document.getElementById('pbp-panel');
+    if (el) el.innerHTML = `<div class="badge ok" style="padding:8px 14px;margin-top:12px;font-size:13px;">
+      ✓ ${res.count} PBP${res.count !== 1 ? 's' : ''} linked to catalog</div>`;
+  } else {
+    toast(res.error || 'Failed to confirm links', 'err');
+  }
+}
+
+function _pbpDismiss() {
+  const el = document.getElementById('pbp-panel');
+  if (el) el.innerHTML = '';
 }

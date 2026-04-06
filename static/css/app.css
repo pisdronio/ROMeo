@@ -939,3 +939,155 @@ input[type="checkbox"] { accent-color: var(--purple); width: 14px; height: 14px;
 }
 .convert-result-row.ok { color: var(--aqua); }
 .convert-result-row.err { color: var(--red); }
+
+/* ── Format badges ───────────────────────────────────────────────────── */
+.fmt-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--text2);
+  flex-shrink: 0;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.fmt-badge.pbp  { color: var(--purple); border-color: var(--purpled); background: rgba(167,3,248,0.06); }
+.fmt-badge.chd  { color: var(--aqua);   border-color: var(--aquad);   background: rgba(0,255,215,0.05); }
+.fmt-badge.cso  { color: var(--orange); border-color: rgba(255,153,68,0.4); }
+.fmt-badge.iso, .fmt-badge.bin, .fmt-badge.zip, .fmt-badge.nes, .fmt-badge.sfc,
+.fmt-badge.gba, .fmt-badge.nds, .fmt-badge.gb, .fmt-badge.gbc { color: var(--text1); }
+
+/* ── PBP Review Panel ────────────────────────────────────────────────── */
+.pbp-panel {
+  margin-top: 12px;
+  border: 1px solid var(--purpled);
+  border-radius: var(--radius);
+  background: var(--bg1);
+  overflow: hidden;
+}
+.pbp-panel-header {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+}
+.pbp-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--purple);
+}
+.pbp-panel-sub {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 2px;
+}
+.pbp-items {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.pbp-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.pbp-item:last-child { border-bottom: none; }
+.pbp-item-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.pbp-status-dot { font-size: 9px; }
+.pbp-filename {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.pbp-sfo-title {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pbp-candidates { margin-bottom: 6px; }
+.pbp-candidate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s;
+}
+.pbp-candidate:hover { background: var(--bg3); }
+.pbp-candidate.selected {
+  background: var(--bg3);
+  outline: 1px solid var(--purpled);
+  outline-offset: -1px;
+}
+.pbp-match-score {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: center;
+}
+.pbp-match-score.high { color: var(--aqua);   background: rgba(0,255,215,0.08); }
+.pbp-match-score.mid  { color: var(--orange); background: rgba(255,153,68,0.08); }
+.pbp-match-score.low  { color: var(--text2);  background: var(--bg2); }
+.pbp-cand-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pbp-cand-meta { font-size: 10px; flex-shrink: 0; }
+.pbp-search-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pbp-search-input {
+  flex: 1;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+.pbp-search-results { margin-top: 4px; }
+.pbp-item-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pbp-accepted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: rgba(0,255,215,0.05);
+  border: 1px solid rgba(0,255,215,0.15);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+.pbp-skipped {
+  font-size: 12px;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+}
+.pbp-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}

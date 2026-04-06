@@ -82,8 +82,17 @@ CREATE TABLE IF NOT EXISTS hash_cache (
     crc32       TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pbp_links (
+    pbp_path     TEXT PRIMARY KEY,
+    game_crc32   TEXT NOT NULL,
+    sfo_title    TEXT DEFAULT '',
+    sfo_id       TEXT DEFAULT '',
+    confirmed_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_games_console ON games(console);
 CREATE INDEX IF NOT EXISTS idx_games_group   ON games(group_key);
+CREATE INDEX IF NOT EXISTS idx_pbp_crc       ON pbp_links(game_crc32);
 """
 
 
@@ -347,6 +356,38 @@ def cache_set(path: str, size: int, mtime: float, crc32: str):
     )
     conn.commit()
     conn.close()
+
+
+def add_pbp_links(links: List[dict]):
+    """
+    Confirm PBP→game associations.
+    Each link: {pbp_path, game_crc32, sfo_title, sfo_id, confirmed_at}
+    Also inserts into collection with INSERT OR IGNORE so CRC-matched entries
+    are never overwritten.
+    """
+    if not links:
+        return
+    conn = get_conn()
+    conn.executemany("""
+        INSERT OR REPLACE INTO pbp_links
+        (pbp_path, game_crc32, sfo_title, sfo_id, confirmed_at)
+        VALUES (:pbp_path, :game_crc32, :sfo_title, :sfo_id, :confirmed_at)
+    """, links)
+    # Add to collection only if not already present (keeps CRC match intact)
+    conn.executemany("""
+        INSERT OR IGNORE INTO collection (crc32, rom_path, scanned_at)
+        VALUES (:game_crc32, :pbp_path, :confirmed_at)
+    """, links)
+    conn.commit()
+    conn.close()
+
+
+def get_pbp_links_map() -> Dict[str, str]:
+    """Return {pbp_path: game_crc32} for all confirmed links."""
+    conn = get_conn()
+    rows = conn.execute("SELECT pbp_path, game_crc32 FROM pbp_links").fetchall()
+    conn.close()
+    return {r["pbp_path"]: r["game_crc32"] for r in rows}
 
 
 def get_recent_scans(limit: int = 10) -> List[dict]:

@@ -19,10 +19,11 @@ from core.dats import (dat_status, download_dat, LIBRETRO_DATS,
                         invalidate_cache, dat_to_game_entries, load_all_dats, get_dat)
 from core.db import (upsert_games, bulk_add_collection,
                      get_catalog_groups, get_catalog_stats, get_collection_for_export,
-                     clear_catalog, save_scan, get_recent_scans)
+                     clear_catalog, save_scan, get_recent_scans, add_pbp_links)
 from core.fileops import (safe_trash, restore_from_trash, empty_trash,
                            trash_contents, export_library, preview_export)
-from core.converter import convert_file, ALL_CONVERTIBLE, MANUAL_CONVERTIBLE
+from core.converter import convert_file, AUTO_CONVERTIBLE
+from core.pbp import identify_pbp
 
 app = Flask(__name__, static_folder="static")
 
@@ -133,7 +134,7 @@ KNOWN_CONSOLES = {
 
 scan_progress = {"status": "idle", "current": 0, "total": 0,
                  "file": "", "scan_id": None, "matched": 0,
-                 "unmatched_by_console": {}, "convertible": []}
+                 "unmatched_by_console": {}, "convertible": [], "pbp_files": []}
 scan_lock = threading.Lock()
 
 convert_progress = {"status": "idle", "current": 0, "total": 0,
@@ -270,13 +271,21 @@ def start_scan():
                         entry = unmatched_by_console.setdefault(con, {"count": 0, "exts": {}})
                         entry["count"] += 1
                         entry["exts"][ext] = entry["exts"].get(ext, 0) + 1
-                    if ext in ALL_CONVERTIBLE:
+                    # PBPs have their own identification flow — don't add to convertible
+                    if ext in AUTO_CONVERTIBLE:
                         convertible.append({
                             "path": f["path"],
                             "ext":  ext,
-                            "manual": ext in MANUAL_CONVERTIBLE,
-                            "note":  MANUAL_CONVERTIBLE.get(ext, ""),
+                            "manual": False,
                         })
+
+            # Identify PBP files via embedded SFO metadata (any PBP, matched or not)
+            pbp_files = []
+            for f in files:
+                if Path(f["path"]).suffix.lower() == ".pbp":
+                    result = identify_pbp(Path(f["path"]))
+                    if result:
+                        pbp_files.append(result)
 
             bulk_add_collection(matches)
             finished = datetime.now().isoformat()
@@ -289,6 +298,7 @@ def start_scan():
                 scan_progress["matched"] = len(matches)
                 scan_progress["unmatched_by_console"] = unmatched_by_console
                 scan_progress["convertible"] = convertible
+                scan_progress["pbp_files"] = pbp_files
 
         except Exception as e:
             with scan_lock:
@@ -808,6 +818,31 @@ def dats_delete():
     invalidate_cache(console)
     clear_catalog(console=console)
     return jsonify({"ok": True})
+
+
+# ── PBP identification ────────────────────────────────────────────────────────
+
+@app.route("/api/pbp/search", methods=["POST"])
+def pbp_search():
+    data  = request.json or {}
+    title = data.get("title", "").strip()
+    if not title:
+        return jsonify({"candidates": []})
+    from core.pbp import find_game_candidates
+    return jsonify({"candidates": find_game_candidates(title, limit=8)})
+
+
+@app.route("/api/pbp/confirm", methods=["POST"])
+def pbp_confirm():
+    data  = request.json or {}
+    links = data.get("links", [])
+    if not links:
+        return jsonify({"ok": False, "error": "No links provided"}), 400
+    now = datetime.now().isoformat()
+    for link in links:
+        link["confirmed_at"] = now
+    add_pbp_links(links)
+    return jsonify({"ok": True, "count": len(links)})
 
 
 # ── History ───────────────────────────────────────────────────────────────────
