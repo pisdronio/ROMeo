@@ -228,9 +228,31 @@ def normalize_title(name: str) -> str:
 
 
 def _find_chdman() -> str:
-    """Return path to chdman binary, or '' if not found."""
+    """Return path to chdman binary, or '' if not found.
+
+    Search order:
+      1. System PATH
+      2. App-local tools dir  (user can drop a binary there manually)
+      3. RetroArch macOS bundle
+      4. Explicit Homebrew prefixes (Apple Silicon then Intel)
+    """
     import shutil
-    return shutil.which("chdman") or ""
+    found = shutil.which("chdman")
+    if found:
+        return found
+    # App-local — ~/Library/Application Support/ROMeo/tools/chdman
+    local = Path.home() / "Library" / "Application Support" / "ROMeo" / "tools" / "chdman"
+    if local.exists():
+        return str(local)
+    # RetroArch macOS bundle
+    ra = Path("/Applications/RetroArch.app/Contents/MacOS/chdman")
+    if ra.exists():
+        return str(ra)
+    # Homebrew explicit prefixes (Apple Silicon: /opt/homebrew, Intel: /usr/local)
+    for prefix in ("/opt/homebrew/bin/chdman", "/usr/local/bin/chdman"):
+        if Path(prefix).exists():
+            return prefix
+    return ""
 
 
 def _crc32_file_slice(path: Path, offset: int, length: int, chunk: int = 1 << 16) -> str:

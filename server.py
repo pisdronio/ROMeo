@@ -144,6 +144,9 @@ convert_lock = threading.Lock()
 dat_progress = {"status": "idle", "message": "", "done": [], "failed": []}
 dat_lock = threading.Lock()
 
+tool_progress = {"status": "idle", "tool": "", "message": ""}
+tool_lock = threading.Lock()
+
 
 # ── Version ───────────────────────────────────────────────────────────────────
 
@@ -156,7 +159,70 @@ def get_version():
 @app.route("/api/tools")
 def tools_status():
     from core.scanner import _find_chdman
-    return jsonify({"chdman": _find_chdman() or None})
+    import shutil
+    chdman = _find_chdman()
+    return jsonify({
+        "chdman":      chdman or None,
+        "brew":        shutil.which("brew") or None,
+    })
+
+
+@app.route("/api/tools/install", methods=["POST"])
+def tools_install():
+    import shutil, subprocess
+    data = request.json or {}
+    tool = data.get("tool", "")
+    if tool != "chdman":
+        return jsonify({"ok": False, "error": "Unknown tool"}), 400
+
+    with tool_lock:
+        if tool_progress["status"] == "installing":
+            return jsonify({"ok": False, "error": "Install already in progress"}), 409
+
+    brew = shutil.which("brew")
+    if not brew:
+        return jsonify({
+            "ok": False,
+            "error": "Homebrew not found — install it first from brew.sh"
+        }), 400
+
+    def run():
+        with tool_lock:
+            tool_progress.update({"status": "installing", "tool": tool,
+                                   "message": "Running brew install mame…"})
+        try:
+            proc = subprocess.Popen(
+                [brew, "install", "mame"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            for line in proc.stdout:
+                line = line.strip()
+                if line:
+                    with tool_lock:
+                        tool_progress["message"] = line
+            proc.wait()
+            from core.scanner import _find_chdman
+            if proc.returncode == 0 and _find_chdman():
+                with tool_lock:
+                    tool_progress.update({"status": "done",
+                                          "message": "chdman installed successfully"})
+            else:
+                with tool_lock:
+                    tool_progress.update({"status": "error",
+                                          "message": f"brew exited {proc.returncode}"})
+        except Exception as e:
+            with tool_lock:
+                tool_progress.update({"status": "error", "message": str(e)})
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/tools/install/progress")
+def tools_install_progress_endpoint():
+    with tool_lock:
+        return jsonify(dict(tool_progress))
 
 
 # ── Static ────────────────────────────────────────────────────────────────────

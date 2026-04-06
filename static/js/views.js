@@ -248,6 +248,7 @@ function renderScan() {
       </div>
       <div id="scan-result" class="mt16"></div>
     </div>
+    <div id="tools-setup-panel" style="padding:0 24px 8px;"></div>
     <div style="padding:0 24px 24px;">
       <div class="form-label" style="margin-bottom:12px;">Recent Scans</div>
       <div id="recent-scans"><span class="muted">Loading…</span></div>
@@ -257,6 +258,7 @@ function renderScan() {
   _scanQueue = [];
 
   document.getElementById("btn-scan").addEventListener("click", startScan);
+  loadToolsSetup();
 
   document.getElementById("btn-browse").addEventListener("click", async () => {
     const btn = document.getElementById("btn-browse");
@@ -1446,4 +1448,105 @@ async function _pbpConfirmAll() {
 function _pbpDismiss() {
   const el = document.getElementById('pbp-panel');
   if (el) el.innerHTML = '';
+}
+
+
+// ── Tools setup panel ─────────────────────────────────────────────────────────
+
+let _toolInstallTimer = null;
+
+async function loadToolsSetup() {
+  const el = document.getElementById('tools-setup-panel');
+  if (!el) return;
+
+  const tools = await API.get('/api/tools');
+
+  if (tools.chdman) {
+    el.innerHTML = '';  // all good — hide panel
+    return;
+  }
+
+  const brewAvailable = !!tools.brew;
+
+  el.innerHTML = `
+    <div class="setup-card">
+      <div class="setup-card-title">⚠ Missing: chdman</div>
+      <div class="setup-card-body">
+        <p>chdman is required to match <strong>CHD</strong> disc images against your catalog.
+        Without it, CHD files will show as unmatched.</p>
+        <div class="setup-tool-row">
+          <span class="setup-tool-name">chdman</span>
+          <span class="badge issues">not found</span>
+        </div>
+        <div class="setup-options">
+          ${brewAvailable ? `
+          <div class="setup-option">
+            <div class="setup-option-label">Option 1 — Auto-install via Homebrew</div>
+            <div class="setup-option-desc muted">Installs the MAME toolchain (~500 MB). Takes a few minutes.</div>
+            <button class="btn primary small" id="btn-brew-install">Install via Homebrew</button>
+            <div class="progress-wrap" id="tool-install-wrap" style="display:none;margin-top:8px;">
+              <div class="progress-bar-bg"><div class="progress-bar-fill" id="tool-install-bar" style="width:30%;animation:indeterminate 1.4s ease infinite;"></div></div>
+              <div class="progress-label mono" id="tool-install-label" style="font-size:10px;">Starting…</div>
+            </div>
+          </div>` : `
+          <div class="setup-option">
+            <div class="setup-option-label">Option 1 — Install Homebrew first</div>
+            <div class="setup-option-desc muted">Homebrew not found. Install it from <strong>brew.sh</strong>, then reopen ROMeo.</div>
+          </div>`}
+          <div class="setup-option" style="margin-top:10px;">
+            <div class="setup-option-label">Option 2 — RetroArch</div>
+            <div class="setup-option-desc muted">If you have RetroArch installed, chdman is bundled inside it and will be detected automatically.</div>
+          </div>
+          <div class="setup-option" style="margin-top:10px;">
+            <div class="setup-option-label">Option 3 — Manual placement</div>
+            <div class="setup-option-desc muted">Drop any <code>chdman</code> binary into:</div>
+            <div class="mono setup-path">~/Library/Application Support/ROMeo/tools/chdman</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  if (brewAvailable) {
+    document.getElementById('btn-brew-install').addEventListener('click', startToolInstall);
+  }
+}
+
+async function startToolInstall() {
+  const btn = document.getElementById('btn-brew-install');
+  if (btn) btn.disabled = true;
+
+  const res = await API.post('/api/tools/install', { tool: 'chdman' });
+  if (!res.ok) {
+    toast(res.error || 'Install failed', 'err');
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  const wrap = document.getElementById('tool-install-wrap');
+  if (wrap) wrap.style.display = 'block';
+
+  clearInterval(_toolInstallTimer);
+  _toolInstallTimer = setInterval(pollToolInstall, 1000);
+}
+
+async function pollToolInstall() {
+  const p     = await API.get('/api/tools/install/progress');
+  const label = document.getElementById('tool-install-label');
+  if (label && p.message) label.textContent = p.message;
+
+  if (p.status === 'done') {
+    clearInterval(_toolInstallTimer);
+    const bar = document.getElementById('tool-install-bar');
+    if (bar) { bar.style.width = '100%'; bar.style.animation = 'none'; }
+    toast('chdman installed — ready to scan CHD files', 'ok');
+    setTimeout(loadToolsSetup, 800);  // re-check — panel should disappear
+  }
+
+  if (p.status === 'error') {
+    clearInterval(_toolInstallTimer);
+    if (label) label.textContent = '✗ ' + p.message;
+    toast('Install failed: ' + p.message, 'err');
+    const btn = document.getElementById('btn-brew-install');
+    if (btn) btn.disabled = false;
+  }
 }
